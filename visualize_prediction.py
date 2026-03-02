@@ -10,16 +10,9 @@ from PIL import Image
 # CONFIG
 # ==========================
 MODEL_PATH = "best_model_fold0.pth"                # trained checkpoint
-IMAGE_DIR = "recodai-luc-scientific-image-forgery-detection/test_images"  # folder containing test images
-# list of example filenames (adjust or leave empty to auto‑scan directory)
-IMAGE_NAMES = [
-    "0001.jpg",
-    "0002.jpg",
-    "0003.jpg",
-    "0004.jpg",
-    "0005.jpg",
-]
-OUTPUT_DIR = "visualizations"                        # where side-by-side PNGs will be saved
+IMAGE_DIR = "recodai-luc-scientific-image-forgery-detection"  # root dataset folder
+NUM_IMAGES = 5                                     # how many examples to process
+OUTPUT_DIR = "visualizations"                     # where side-by-side PNGs will be saved
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ==========================
@@ -75,20 +68,32 @@ transform = transforms.Compose([
 # ==========================
 # inference loop
 # ==========================
-# gather image list: either from IMAGE_NAMES or directory scan
-if not IMAGE_NAMES:
-    # collect first five PNG/JPG files
-    IMAGE_NAMES = [f for f in os.listdir(IMAGE_DIR)
-                   if f.lower().endswith(('.png', '.jpg', '.jpeg'))][:5]
+# collect a few images automatically; prefer test set, fallback to training images
+import glob
+
+image_paths = []
+# look for test images
+test_dir = os.path.join(IMAGE_DIR, "test_images")
+if os.path.isdir(test_dir):
+    image_paths = glob.glob(os.path.join(test_dir, "*.png"))
+    image_paths += glob.glob(os.path.join(test_dir, "*.jpg"))
+
+# if no test images found, search train_images subfolders recursively
+if not image_paths:
+    train_dir = os.path.join(IMAGE_DIR, "train_images")
+    if os.path.isdir(train_dir):
+        image_paths = glob.glob(os.path.join(train_dir, "**", "*.png"), recursive=True)
+        image_paths += glob.glob(os.path.join(train_dir, "**", "*.jpg"), recursive=True)
+
+# sort and trim
+image_paths = sorted(image_paths)[:NUM_IMAGES]
+if not image_paths:
+    raise FileNotFoundError("No images found in test_images or train_images")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-for img_name in IMAGE_NAMES:
-    image_path = os.path.join(IMAGE_DIR, img_name)
-    if not os.path.exists(image_path):
-        print(f"⚠️ {image_path} not found, skipping")
-        continue
-
+for image_path in image_paths:
+    img_name = os.path.basename(image_path)
     image = Image.open(image_path).convert("RGB")
     input_tensor = transform(image).unsqueeze(0).to(DEVICE)
 
@@ -115,8 +120,23 @@ for img_name in IMAGE_NAMES:
     alpha = 0.5
     blended = cv2.addWeighted(original, 1 - alpha, overlay, alpha, 0)
 
-    # Side-by-side
+    # Side-by-side with labels
+    h, w, _ = original.shape
     comparison = np.hstack([original, blended])
+
+    # annotate titles
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(comparison, 'Original', (10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
+    cv2.putText(comparison, 'Prediction (red = forgery)', (w+10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
+
+    # optionally draw bounding box around masked region on prediction side
+    mask_uint8 = (mask_np > 0).astype(np.uint8)
+    contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for cnt in contours:
+        x,y,ww,hh = cv2.boundingRect(cnt)
+        cv2.rectangle(comparison, (w+x, y), (w+x+ww, y+hh), (0,0,255), 2)
+        cv2.putText(comparison, 'Forged area', (w+x, y-10), font, 0.6, (0,0,255), 2, cv2.LINE_AA)
+
     output_path = os.path.join(OUTPUT_DIR, f"{os.path.splitext(img_name)[0]}_viz.png")
     cv2.imwrite(output_path, cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
 
