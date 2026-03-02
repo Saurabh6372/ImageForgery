@@ -1,4 +1,10 @@
-# Core dependencies for Scientific Image Forgery Detection
+# ImageForgery Project Dependencies
+# --------------------------------
+# Run `pip install -r requirements.txt` to install the packages
+# This file contains the libraries used across various training,
+# inference and utility scripts in the repository. Comments group
+# packages by their primary purpose and provide a quick reminder
+# of why each is included.
 # Compatible with Mac M1/M2/M3 and Intel Macs
 
 # Deep Learning Framework
