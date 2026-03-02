@@ -1,0 +1,42 @@
+# Model files
+*.pth
+*.pt
+*.h5
+*.pkl
+*.pickle
+
+# Dataset and supplemental data
+recodai-luc-scientific-image-forgery-detection/
+data/
+dataset/
+__pycache__/
+*.pyc
+
+# Submission files
+submission.csv
+*.csv
+
+# Virtual environment
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Other
+*.log
+.env
