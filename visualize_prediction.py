@@ -1,9 +1,11 @@
 import os
+import argparse
+import subprocess
 import torch
 import cv2
 import numpy as np
 from torchvision import transforms
-from torchvision.models.segmentation import deeplabv3_resnet50
+from torchvision.models import segmentation
 from PIL import Image
 
 # ==========================
@@ -15,14 +17,29 @@ NUM_IMAGES = 5                                     # how many examples to proces
 OUTPUT_DIR = "visualizations"                     # where side-by-side PNGs will be saved
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+# threshold for forgery probability
+THRESHOLD = 0.5
+
 # ==========================
 # Load Model Architecture
 # ==========================
-# the checkpoint was trained with binary segmentation (2 output channels),
-# so the model must be created with num_classes=2.  later we select the
-# second channel as the forgery probability.
-model = deeplabv3_resnet50(weights=None, num_classes=2)
+# we allow choosing architecture via command-line (resnet50 or resnet101)
+
+parser = argparse.ArgumentParser(description="Visualize predictions with a segmentation model")
+parser.add_argument("--arch", type=str, default="deeplabv3_resnet50",
+                    help="model architecture (deeplabv3_resnet50 or deeplabv3_resnet101)")
+parser.add_argument("--threshold", type=float, default=THRESHOLD,
+                    help="probability threshold for forgery mask")
+args = parser.parse_args()
+THRESHOLD = args.threshold
+
+# create model dynamically
+if args.arch not in ["deeplabv3_resnet50", "deeplabv3_resnet101"]:
+    raise ValueError(f"Unsupported architecture {args.arch}")
+model_ctor = getattr(segmentation, args.arch)
+model = model_ctor(weights=None, num_classes=2)
 model.to(DEVICE)
+print(f"Using architecture: {args.arch}")
 
 # ==========================
 # Load Checkpoint Correctly
@@ -78,17 +95,25 @@ if os.path.isdir(test_dir):
     image_paths = glob.glob(os.path.join(test_dir, "*.png"))
     image_paths += glob.glob(os.path.join(test_dir, "*.jpg"))
 
-# if no test images found, search train_images subfolders recursively
-if not image_paths:
+# if we still need more images, grab from train set as well
+if len(image_paths) < NUM_IMAGES:
     train_dir = os.path.join(IMAGE_DIR, "train_images")
     if os.path.isdir(train_dir):
-        image_paths = glob.glob(os.path.join(train_dir, "**", "*.png"), recursive=True)
-        image_paths += glob.glob(os.path.join(train_dir, "**", "*.jpg"), recursive=True)
+        train_paths = glob.glob(os.path.join(train_dir, "**", "*.png"), recursive=True)
+        train_paths += glob.glob(os.path.join(train_dir, "**", "*.jpg"), recursive=True)
+        # avoid duplicates
+        train_paths = [p for p in sorted(train_paths) if p not in image_paths]
+        needed = NUM_IMAGES - len(image_paths)
+        image_paths += train_paths[:needed]
 
-# sort and trim
+# final trimming (in case test had more than needed)
 image_paths = sorted(image_paths)[:NUM_IMAGES]
 if not image_paths:
     raise FileNotFoundError("No images found in test_images or train_images")
+
+print(f"Processing {len(image_paths)} images:")
+for p in image_paths:
+    print("  -", p)
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -103,7 +128,7 @@ for image_path in image_paths:
     with torch.no_grad():
         output = model(input_tensor)["out"]        # shape: [1,2,H,W]
         probs = torch.softmax(output, dim=1)[0, 1]  # probability of class=1 (forgery)
-        mask = (probs > 0.5).float()
+        mask = (probs > THRESHOLD).float()
 
     mask_np = mask.squeeze().cpu().numpy()
 
@@ -141,4 +166,10 @@ for image_path in image_paths:
     cv2.imwrite(output_path, cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
 
     print(f"Saved visualization to: {output_path}")
+    # open the image so you can immediately view it on macOS
+    try:
+        subprocess.run(["open", output_path])
+    except Exception:
+        pass
+
 
