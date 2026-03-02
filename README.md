@@ -43,6 +43,7 @@ This repository contains code used to participate in the **Recod.ai / LUC Scient
 | `generate_submission_only.py` | Lightweight inference script that loads pre‑trained DeepLabV3+ models and outputs `submission.csv`. | No training code; minimal dependencies. Good for quick submissions using existing `.pth` files. |
 | `submission_dinov2_optimized.py` | Optimized DINOv2-large inference for Kaggle (robust offline model loading, configurable TTA, device selection). | Intended as the production submission script—handles offline cases gracefully. |
 | `submission_ensemble.py` | Ensemble of DINOv2-large and DeepLabV3+ predictions with weighted blending and shared framework. | Demonstrates how to combine models at inference time for higher accuracy. |
+| `visualize_prediction.py` | Standalone visualization/demo script. Loads a trained DeepLabV3 model, runs inference on a few images (test or train), overlays predicted forgery masks in red, and automatically opens the results. | Useful for quick proof‑of‑concept on a local machine; supports resnet50/resnet101 backbones and macOS viewer. |
 | `test.py` | Placeholder/test file. Contains a simple print statement. | Not used in notebooks; just for sanity checks. |
 | `requirements.txt` | Python dependencies split into categories with comments. | Already commented to explain purpose of each library. |
 | `.gitignore` | Excludes large model files, datasets, CSVs, environment, etc. | Keeps repo lightweight for GitHub. |
@@ -50,7 +51,7 @@ This repository contains code used to participate in the **Recod.ai / LUC Scient
 
 ### 📝 Notes on Scripts
 
-- **Training vs Inference**: `Forgery_using_DeepLabV3+.py` and `main.py` perform training; the others are inference or submission utilities.
+- **Training vs Inference**: `Forgery_using_DeepLabV3+.py` and `main.py` perform training; the others are inference or submission utilities. The new `visualize_prediction.py` is a local visualization/demonstration tool that is separate from the Kaggle submission scripts.
 - **Model Types**: Some scripts use `deeplabv3_resnet*` (traditional segmentation), others rely on `facebook/dinov2-*` transformer models.
 - **File Paths**: All scripts have configurable paths in their `Config`/`CFG` classes. Update these to match your local or Kaggle environment.
 - **Post-Processing**: Most inference scripts include morphological operations, thresholding, and optional TTA to refine predicted masks.
