@@ -1,13 +1,14 @@
 import os
-import argparse
-import subprocess
 import torch
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 from torchvision import transforms
-from torchvision.models import segmentation
+from torchvision.models.segmentation import deeplabv3_resnet50, deeplabv3_resnet101
 from PIL import Image
+import matplotlib.pyplot as plt
+
+# You can switch the architecture below by commenting/uncommenting.
+# Example: use resnet101 by setting MODEL_ARCH='resnet101'.
 
 # ==========================
 # CONFIG
@@ -18,29 +19,19 @@ NUM_IMAGES = 5                                     # how many examples to proces
 OUTPUT_DIR = "visualizations"                     # where side-by-side PNGs will be saved
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# threshold for forgery probability
-THRESHOLD = 0.5
-
 # ==========================
 # Load Model Architecture
 # ==========================
-# we allow choosing architecture via command-line (resnet50 or resnet101)
-
-parser = argparse.ArgumentParser(description="Visualize predictions with a segmentation model")
-parser.add_argument("--arch", type=str, default="deeplabv3_resnet50",
-                    help="model architecture (deeplabv3_resnet50 or deeplabv3_resnet101)")
-parser.add_argument("--threshold", type=float, default=THRESHOLD,
-                    help="probability threshold for forgery mask")
-args = parser.parse_args()
-THRESHOLD = args.threshold
-
-# create model dynamically
-if args.arch not in ["deeplabv3_resnet50", "deeplabv3_resnet101"]:
-    raise ValueError(f"Unsupported architecture {args.arch}")
-model_ctor = getattr(segmentation, args.arch)
-model = model_ctor(weights=None, num_classes=2)
+# the checkpoint was trained with binary segmentation (2 output channels),
+# so the model must be created with num_classes=2.  later we select the
+# second channel as the forgery probability.
+# change MODEL_ARCH if you want to experiment with different backbones.
+MODEL_ARCH = 'resnet50'  # options: 'resnet50', 'resnet101'
+if MODEL_ARCH == 'resnet50':
+    model = deeplabv3_resnet50(weights=None, num_classes=2)
+else:
+    model = deeplabv3_resnet101(weights=None, num_classes=2)
 model.to(DEVICE)
-print(f"Using architecture: {args.arch}")
 
 # ==========================
 # Load Checkpoint Correctly
@@ -70,6 +61,8 @@ for k, v in state_dict.items():
 
 model.load_state_dict(new_state_dict, strict=False)
 model.eval()
+print("Model loaded successfully!")
+
 print("Model loaded successfully!")
 
 # ==========================
@@ -119,7 +112,7 @@ for image_path in image_paths:
     with torch.no_grad():
         output = model(input_tensor)["out"]        # shape: [1,2,H,W]
         probs = torch.softmax(output, dim=1)[0, 1]  # probability of class=1 (forgery)
-        mask = (probs > THRESHOLD).float()
+        mask = (probs > 0.5).float()
 
     mask_np = mask.squeeze().cpu().numpy()
 
@@ -157,17 +150,18 @@ for image_path in image_paths:
     cv2.imwrite(output_path, cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
 
     print(f"Saved visualization to: {output_path}")
-    # open the image so you can immediately view it on macOS
+
+    # display using matplotlib for immediate visual feedback
+    plt.figure(figsize=(12, 6))
+    plt.imshow(comparison)
+    plt.axis('off')
+    plt.title(f"Original vs Prediction ({img_name})")
+    plt.show()
+    # try opening in default viewer (macOS)
     try:
+        import subprocess
         subprocess.run(["open", output_path])
     except Exception:
         pass
-
-    # also display inline using matplotlib for clarity
-    plt.figure(figsize=(10,5))
-    plt.imshow(comparison)
-    plt.axis('off')
-    plt.title(img_name)
-    plt.show()
 
 
