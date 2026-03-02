@@ -13,7 +13,7 @@ from PIL import Image
 # ==========================
 MODEL_PATH = "best_model_fold0.pth"                # trained checkpoint
 IMAGE_DIR = "recodai-luc-scientific-image-forgery-detection"  # root dataset folder
-NUM_IMAGES = 20                                    # how many examples to process by default
+NUM_IMAGES = None                                  # how many examples to process; None = all test images
 OUTPUT_DIR = "visualizations"                     # where side-by-side PNGs will be saved
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -31,11 +31,13 @@ parser.add_argument("--arch", type=str, default="deeplabv3_resnet50",
 parser.add_argument("--threshold", type=float, default=THRESHOLD,
                     help="probability threshold for forgery mask")
 parser.add_argument("--num", type=int, default=NUM_IMAGES,
-                    help="number of images to process (will sample from dataset)")
+                    help="optional: limit number of test images to process")
 args = parser.parse_args()
 THRESHOLD = args.threshold
 NUM_IMAGES = args.num
-print(f"Threshold set to {THRESHOLD}, will process up to {NUM_IMAGES} images")
+print(f"Threshold set to {THRESHOLD}")
+if NUM_IMAGES is not None:
+    print(f"Processing up to {NUM_IMAGES} test images")
 
 # create model dynamically
 if args.arch not in ["deeplabv3_resnet50", "deeplabv3_resnet101"]:
@@ -99,32 +101,22 @@ if os.path.isdir(test_dir):
     image_paths = glob.glob(os.path.join(test_dir, "*.png"))
     image_paths += glob.glob(os.path.join(test_dir, "*.jpg"))
 
-# if we still need more images, grab from supplemental and train set as well
-if len(image_paths) < NUM_IMAGES:
-    # supplemental_images folder (no masks)
-    supp_dir = os.path.join(IMAGE_DIR, "supplemental_images")
-    if os.path.isdir(supp_dir):
-        supp_paths = glob.glob(os.path.join(supp_dir, "*.png"))
-        supp_paths += glob.glob(os.path.join(supp_dir, "*.jpg"))
-        supp_paths = [p for p in sorted(supp_paths) if p not in image_paths]
-        needed = NUM_IMAGES - len(image_paths)
-        image_paths += supp_paths[:needed]
-    # still can take from training
-    if len(image_paths) < NUM_IMAGES:
-        train_dir = os.path.join(IMAGE_DIR, "train_images")
-        if os.path.isdir(train_dir):
-            train_paths = glob.glob(os.path.join(train_dir, "**", "*.png"), recursive=True)
-            train_paths += glob.glob(os.path.join(train_dir, "**", "*.jpg"), recursive=True)
-            train_paths = [p for p in sorted(train_paths) if p not in image_paths]
-            needed = NUM_IMAGES - len(image_paths)
-            image_paths += train_paths[:needed]
+# we only look in test_images folder
+test_dir = os.path.join(IMAGE_DIR, "test_images")
+if os.path.isdir(test_dir):
+    image_paths = glob.glob(os.path.join(test_dir, "*.png"))
+    image_paths += glob.glob(os.path.join(test_dir, "*.jpg"))
+else:
+    raise FileNotFoundError("test_images directory not found")
 
-# final trimming (in case test had more than needed)
-image_paths = sorted(image_paths)[:NUM_IMAGES]
+# sort and possibly trim
+image_paths = sorted(image_paths)
+if NUM_IMAGES is not None:
+    image_paths = image_paths[:NUM_IMAGES]
 if not image_paths:
-    raise FileNotFoundError("No images found in test_images or train_images")
+    raise FileNotFoundError("No images found in test_images")
 
-print(f"Processing {len(image_paths)} images:")
+print(f"Processing {len(image_paths)} test images:")
 for p in image_paths:
     print("  -", p)
 
