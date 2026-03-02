@@ -4,6 +4,7 @@ import subprocess
 import torch
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
 from torchvision import transforms
 from torchvision.models import segmentation
 from PIL import Image
@@ -13,7 +14,7 @@ from PIL import Image
 # ==========================
 MODEL_PATH = "best_model_fold0.pth"                # trained checkpoint
 IMAGE_DIR = "recodai-luc-scientific-image-forgery-detection"  # root dataset folder
-NUM_IMAGES = None                                  # how many examples to process; None = all test images
+NUM_IMAGES = 5                                     # how many examples to process
 OUTPUT_DIR = "visualizations"                     # where side-by-side PNGs will be saved
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -30,14 +31,8 @@ parser.add_argument("--arch", type=str, default="deeplabv3_resnet50",
                     help="model architecture (deeplabv3_resnet50 or deeplabv3_resnet101)")
 parser.add_argument("--threshold", type=float, default=THRESHOLD,
                     help="probability threshold for forgery mask")
-parser.add_argument("--num", type=int, default=NUM_IMAGES,
-                    help="optional: limit number of test images to process")
 args = parser.parse_args()
 THRESHOLD = args.threshold
-NUM_IMAGES = args.num
-print(f"Threshold set to {THRESHOLD}")
-if NUM_IMAGES is not None:
-    print(f"Processing up to {NUM_IMAGES} test images")
 
 # create model dynamically
 if args.arch not in ["deeplabv3_resnet50", "deeplabv3_resnet101"]:
@@ -77,8 +72,6 @@ model.load_state_dict(new_state_dict, strict=False)
 model.eval()
 print("Model loaded successfully!")
 
-print("Model loaded successfully!")
-
 # ==========================
 # Preprocess helper
 # ==========================
@@ -101,24 +94,17 @@ if os.path.isdir(test_dir):
     image_paths = glob.glob(os.path.join(test_dir, "*.png"))
     image_paths += glob.glob(os.path.join(test_dir, "*.jpg"))
 
-# we only look in test_images folder
-test_dir = os.path.join(IMAGE_DIR, "test_images")
-if os.path.isdir(test_dir):
-    image_paths = glob.glob(os.path.join(test_dir, "*.png"))
-    image_paths += glob.glob(os.path.join(test_dir, "*.jpg"))
-else:
-    raise FileNotFoundError("test_images directory not found")
-
-# sort and possibly trim
-image_paths = sorted(image_paths)
-if NUM_IMAGES is not None:
-    image_paths = image_paths[:NUM_IMAGES]
+# if no test images found, search train_images subfolders recursively
 if not image_paths:
-    raise FileNotFoundError("No images found in test_images")
+    train_dir = os.path.join(IMAGE_DIR, "train_images")
+    if os.path.isdir(train_dir):
+        image_paths = glob.glob(os.path.join(train_dir, "**", "*.png"), recursive=True)
+        image_paths += glob.glob(os.path.join(train_dir, "**", "*.jpg"), recursive=True)
 
-print(f"Processing {len(image_paths)} test images:")
-for p in image_paths:
-    print("  -", p)
+# sort and trim
+image_paths = sorted(image_paths)[:NUM_IMAGES]
+if not image_paths:
+    raise FileNotFoundError("No images found in test_images or train_images")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -144,11 +130,6 @@ for image_path in image_paths:
     original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
     original = cv2.resize(original, (1024, 1024))
 
-    # also prepare overlay for original side (slightly transparent red)
-    overlay_orig = original.copy()
-    alpha_in = 0.3
-    overlay_orig[mask_np > 0.5] = (np.array([255, 0, 0]) * alpha_in + overlay_orig[mask_np > 0.5] * (1-alpha_in)).astype(np.uint8)
-
     overlay = original.copy()
     overlay[mask_np > 0.5] = [255, 0, 0]  # red forgery region (RGB)
 
@@ -157,12 +138,11 @@ for image_path in image_paths:
 
     # Side-by-side with labels
     h, w, _ = original.shape
-    # show original with faint mask overlay and prediction
-    comparison = np.hstack([overlay_orig, blended])
+    comparison = np.hstack([original, blended])
 
     # annotate titles
     font = cv2.FONT_HERSHEY_SIMPLEX
-    cv2.putText(comparison, 'Original + mask overlay', (10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
+    cv2.putText(comparison, 'Original', (10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
     cv2.putText(comparison, 'Prediction (red = forgery)', (w+10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
 
     # optionally draw bounding box around masked region on prediction side
@@ -182,5 +162,12 @@ for image_path in image_paths:
         subprocess.run(["open", output_path])
     except Exception:
         pass
+
+    # also display inline using matplotlib for clarity
+    plt.figure(figsize=(10,5))
+    plt.imshow(comparison)
+    plt.axis('off')
+    plt.title(img_name)
+    plt.show()
 
 
