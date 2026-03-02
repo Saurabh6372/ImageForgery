@@ -13,7 +13,7 @@ from PIL import Image
 # ==========================
 MODEL_PATH = "best_model_fold0.pth"                # trained checkpoint
 IMAGE_DIR = "recodai-luc-scientific-image-forgery-detection"  # root dataset folder
-NUM_IMAGES = 5                                     # how many examples to process
+NUM_IMAGES = 20                                    # how many examples to process by default
 OUTPUT_DIR = "visualizations"                     # where side-by-side PNGs will be saved
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -30,8 +30,12 @@ parser.add_argument("--arch", type=str, default="deeplabv3_resnet50",
                     help="model architecture (deeplabv3_resnet50 or deeplabv3_resnet101)")
 parser.add_argument("--threshold", type=float, default=THRESHOLD,
                     help="probability threshold for forgery mask")
+parser.add_argument("--num", type=int, default=NUM_IMAGES,
+                    help="number of images to process (will sample from dataset)")
 args = parser.parse_args()
 THRESHOLD = args.threshold
+NUM_IMAGES = args.num
+print(f"Threshold set to {THRESHOLD}, will process up to {NUM_IMAGES} images")
 
 # create model dynamically
 if args.arch not in ["deeplabv3_resnet50", "deeplabv3_resnet101"]:
@@ -95,16 +99,25 @@ if os.path.isdir(test_dir):
     image_paths = glob.glob(os.path.join(test_dir, "*.png"))
     image_paths += glob.glob(os.path.join(test_dir, "*.jpg"))
 
-# if we still need more images, grab from train set as well
+# if we still need more images, grab from supplemental and train set as well
 if len(image_paths) < NUM_IMAGES:
-    train_dir = os.path.join(IMAGE_DIR, "train_images")
-    if os.path.isdir(train_dir):
-        train_paths = glob.glob(os.path.join(train_dir, "**", "*.png"), recursive=True)
-        train_paths += glob.glob(os.path.join(train_dir, "**", "*.jpg"), recursive=True)
-        # avoid duplicates
-        train_paths = [p for p in sorted(train_paths) if p not in image_paths]
+    # supplemental_images folder (no masks)
+    supp_dir = os.path.join(IMAGE_DIR, "supplemental_images")
+    if os.path.isdir(supp_dir):
+        supp_paths = glob.glob(os.path.join(supp_dir, "*.png"))
+        supp_paths += glob.glob(os.path.join(supp_dir, "*.jpg"))
+        supp_paths = [p for p in sorted(supp_paths) if p not in image_paths]
         needed = NUM_IMAGES - len(image_paths)
-        image_paths += train_paths[:needed]
+        image_paths += supp_paths[:needed]
+    # still can take from training
+    if len(image_paths) < NUM_IMAGES:
+        train_dir = os.path.join(IMAGE_DIR, "train_images")
+        if os.path.isdir(train_dir):
+            train_paths = glob.glob(os.path.join(train_dir, "**", "*.png"), recursive=True)
+            train_paths += glob.glob(os.path.join(train_dir, "**", "*.jpg"), recursive=True)
+            train_paths = [p for p in sorted(train_paths) if p not in image_paths]
+            needed = NUM_IMAGES - len(image_paths)
+            image_paths += train_paths[:needed]
 
 # final trimming (in case test had more than needed)
 image_paths = sorted(image_paths)[:NUM_IMAGES]
@@ -139,6 +152,11 @@ for image_path in image_paths:
     original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
     original = cv2.resize(original, (1024, 1024))
 
+    # also prepare overlay for original side (slightly transparent red)
+    overlay_orig = original.copy()
+    alpha_in = 0.3
+    overlay_orig[mask_np > 0.5] = (np.array([255, 0, 0]) * alpha_in + overlay_orig[mask_np > 0.5] * (1-alpha_in)).astype(np.uint8)
+
     overlay = original.copy()
     overlay[mask_np > 0.5] = [255, 0, 0]  # red forgery region (RGB)
 
@@ -147,11 +165,12 @@ for image_path in image_paths:
 
     # Side-by-side with labels
     h, w, _ = original.shape
-    comparison = np.hstack([original, blended])
+    # show original with faint mask overlay and prediction
+    comparison = np.hstack([overlay_orig, blended])
 
     # annotate titles
     font = cv2.FONT_HERSHEY_SIMPLEX
-    cv2.putText(comparison, 'Original', (10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
+    cv2.putText(comparison, 'Original + mask overlay', (10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
     cv2.putText(comparison, 'Prediction (red = forgery)', (w+10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
 
     # optionally draw bounding box around masked region on prediction side
