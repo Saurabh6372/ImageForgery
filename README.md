@@ -1,85 +1,52 @@
-# ImageForgery Detection Project
+# Scientific Image Forgery Detection
 
-This repository contains code used to participate in the **Recod.ai / LUC Scientific Image Forgery Detection** competition. The focus is on segmenting forged regions in scientific images using a variety of deep learning models.
+Pixel-level segmentation of manipulated regions in scientific publication images, built for the **Recod.ai / LUC Scientific Image Forgery Detection** Kaggle competition.
 
-> 📁 **Note:** model weights (`*.pth`, `*.pt`), datasets, and submission `.csv` files are excluded from the repo using `.gitignore`. Only source code is tracked here.
+The interesting part of this project is the **systematic model comparison**: classic CNN encoder–decoders (DeepLabV3+, U-Net++) against a **DINOv2-Large vision transformer** used as a segmentation encoder — evaluated on F1, precision/recall trade-offs, and inference latency.
 
----
+<!-- Add an example here: input image → predicted forgery mask overlay (docs/example.png) -->
 
-## 🚀 Getting Started
+## Method
 
-1. **Clone the repo**:
-   ```bash
-   git clone https://github.com/Saurabh6372/ImageForgery.git
-   cd ImageForgery
-   ```
+- **Task:** binary pixel classification (authentic vs. forged region), trained on the competition's labelled masks.
+- **Models compared:** DeepLabV3+ (ResNet-50/101), U-Net++ (EfficientNet / SE-ResNeXt encoders via `segmentation_models_pytorch`), DINOv2-Large ViT segmentation head.
+- **High-resolution inference:** 1024×1024 sliding-window tiling with Gaussian-weighted overlap stitching, so full-resolution masks are reconstructed without boundary artefacts or GPU memory overflow.
+- **Post-processing:** Otsu thresholding + morphological filtering (dilation, erosion, connected-component cleanup); thresholds chosen by grid search on the validation split.
+- **Ensembling:** weighted blending of DINOv2 and DeepLabV3+ predictions, plus optional test-time augmentation.
 
-2. **Install dependencies**:
-   ```bash
-   python -m venv .venv        # create virtual environment
-   source .venv/bin/activate   # macOS / Linux
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
+**Finding:** DINOv2-Large achieved the best F1 but at ~3× the inference time of the CNN baselines — the CNN/ViT trade-off is documented in the training scripts.
 
-3. **Download data and model weights**
-   - Download the **Recod.ai dataset** and extract into `./recodai-luc-scientific-image-forgery-detection`.
-   - Place your trained model files (`best_model_fold0.pth`, etc.) in the root directory or update paths in config classes.
-   - If running on Kaggle, adjust paths accordingly (`../input/...`).
+## Repository structure
 
-4. **Run scripts**
-   - See individual file descriptions below for usage instructions.
+```
+training/
+  deeplabv3plus.py        # full DeepLabV3+ training + evaluation pipeline
+  unetpp_smp.py           # U-Net++ training via segmentation_models_pytorch
+inference/
+  ensemble_cnn_dinov2.py        # two-model inference with TTA + post-processing
+  dinov2_sliding_window.py      # high-res DINOv2-Large sliding-window inference
+  generate_submission.py        # lightweight submission from trained DeepLabV3+ weights
+  submission_dinov2_optimized.py  # Kaggle-ready offline DINOv2 inference
+  submission_ensemble.py        # weighted DINOv2 + DeepLabV3+ ensemble submission
+tools/
+  visualize_predictions.py      # overlay predicted masks on images locally
+notebooks/
+  main.ipynb              # exploration notebook
+```
 
----
+> Model weights (`*.pth`), datasets, and submission CSVs are excluded via `.gitignore` — only source code is tracked.
 
-## 📁 File Overview
+## Setup
 
-| File | Purpose | Key Differences |
-|------|---------|-----------------|
-| `Forgery_using_DeepLabV3+.py` | Full training + evaluation pipeline using DeepLabV3+ (ResNet backbones). Includes configuration, dataset class, augmentation, training loop, and optional ensembling. | Intended for local training on Mac; lots of configuration options. Produces `.pth` models. |
-| `main.py` | Alternate training script using `segmentation_models_pytorch` (U-Net++ with encoders like EfficientNet or SE-ResNeXt). | Simpler than `Forgery_using_DeepLabV3+.py`; focused on training only. |
-| `main2.py` | **Inference pipeline** combining two models (custom CNN and DINOv2 segmenter). Includes TTA, post‑processing, and submission generation. | Built for Kaggle-style inference; references sample submission. |
-| `main3.py` | High‑resolution DINOv2 large inference with sliding window tiling. More advanced post‑processing and GPU/CPU checks. | Focused on one large DINOv2 model; suitable for T4 GPUs or high‑RAM machines. |
-| `generate_submission_only.py` | Lightweight inference script that loads pre‑trained DeepLabV3+ models and outputs `submission.csv`. | No training code; minimal dependencies. Good for quick submissions using existing `.pth` files. |
-| `submission_dinov2_optimized.py` | Optimized DINOv2-large inference for Kaggle (robust offline model loading, configurable TTA, device selection). | Intended as the production submission script—handles offline cases gracefully. |
-| `submission_ensemble.py` | Ensemble of DINOv2-large and DeepLabV3+ predictions with weighted blending and shared framework. | Demonstrates how to combine models at inference time for higher accuracy. |
-| `visualize_prediction.py` | Standalone visualization/demo script. Loads a trained DeepLabV3 model, runs inference on a few images (test or train), overlays predicted forgery masks in red, and automatically opens the results. | Useful for quick proof‑of‑concept on a local machine; supports resnet50/resnet101 backbones and macOS viewer. |
-| `test.py` | Placeholder/test file. Contains a simple print statement. | Not used in notebooks; just for sanity checks. |
-| `requirements.txt` | Python dependencies split into categories with comments. | Already commented to explain purpose of each library. |
-| `.gitignore` | Excludes large model files, datasets, CSVs, environment, etc. | Keeps repo lightweight for GitHub. |
+```bash
+git clone https://github.com/Saurabh6372/ImageForgery.git
+cd ImageForgery
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
 
+Download the Recod.ai dataset into `./recodai-luc-scientific-image-forgery-detection/` (or update the paths in each script's `Config` class), then run a training script from `training/` or an inference script from `inference/`.
 
-### 📝 Notes on Scripts
+## Stack
 
-- **Training vs Inference**: `Forgery_using_DeepLabV3+.py` and `main.py` perform training; the others are inference or submission utilities. The new `visualize_prediction.py` is a local visualization/demonstration tool that is separate from the Kaggle submission scripts.
-- **Model Types**: Some scripts use `deeplabv3_resnet*` (traditional segmentation), others rely on `facebook/dinov2-*` transformer models.
-- **File Paths**: All scripts have configurable paths in their `Config`/`CFG` classes. Update these to match your local or Kaggle environment.
-- **Post-Processing**: Most inference scripts include morphological operations, thresholding, and optional TTA to refine predicted masks.
-
-
----
-
-## 📚 Additional Information
-
-- The dataset structure expected is the same as the competition: `train_images/`, `train_masks/`, `test_images/`, etc.
-- `best_model_fold*.pth` files are example weight filenames; rename them as needed.
-- You can use any combination of these scripts depending on whether you want to retrain, run inference locally, or on Kaggle.
-
----
-
-## ✨ Tips & Tricks
-
-- Adjust `IMG_SIZE` and `BATCH_SIZE` in configs for your hardware (especially on Macs with limited GPU memory).
-- When running on Kaggle, prefer the `submission_*.py` scripts which are designed for offline mode.
-- Use `git add . && git commit` after modifying scripts; your `.gitignore` protects against accidentally adding data files.
-
----
-
-## 🎖️ License
-
-Feel free to fork and modify. This code was written for a Kaggle competition and is provided as-is for educational purposes.
-
-
----
-
-*Happy hacking!* 🧠🔍
+Python · PyTorch · segmentation_models_pytorch · Hugging Face (DINOv2) · OpenCV · NumPy
